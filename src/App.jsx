@@ -1,100 +1,124 @@
 import React, { useState } from 'react';
-import { Check, X, Minus } from 'lucide-react';
+import { Check, X, Minus, BarChart3, Edit3, Calendar } from 'lucide-react';
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 
-const HABIT_STRUCTURE = [
-  { id: 'sleep', label: '6hrs Sleep', type: 'item' },
-  { id: 'walks', label: 'Walks', type: 'group', children: [
-    { id: 'walk_morning', label: 'Morning', type: 'item' },
-    { id: 'walk_afternoon', label: 'Afternoon', type: 'item' },
-  ]},
-  { id: 'steps', label: '6k Steps', type: 'item' },
-  { id: 'meals', label: 'Meals Cooked', type: 'group', children: [
-    { id: 'meal_breakfast', label: 'Breakfast', type: 'item' },
-    { id: 'meal_dinner', label: 'Dinner', type: 'item' },
-  ]}
+const HABITS = [
+  { id: 'sleep', label: '6hrs+ Sleep' },
+  { id: 'walk_m', label: 'Morning Walk' },
+  { id: 'walk_a', label: 'Afternoon Walk' },
+  { id: 'walk_e', label: 'Evening Walk' },
+  { id: 'steps', label: '6k Steps' },
+  { id: 'meal_b', label: 'Breakfast' },
+  { id: 'meal_l', label: 'Lunch' },
+  { id: 'meal_d', label: 'Dinner' }
 ];
 
-// Changed to 3 days for better mobile fit
-const generateLastNDays = (n) => {
-  const dates = [];
-  for (let i = n - 1; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    dates.push({
-      id: d.toISOString().split('T')[0],
-      display: `${d.getDate()}/${d.getMonth() + 1}`
-    });
-  }
-  return dates;
-};
-
 export default function App() {
-  const [dates] = useState(generateLastNDays(3)); // Show 3 days
-  const [gridState, setGridState] = useState({});
+  const [view, setView] = useState('input');
+  const [gridData, setGridData] = useState({});
 
-  const handleCellClick = (habitId, dateId) => {
-    const key = `${habitId}_${dateId}`;
-    const next = { empty: 'yes', yes: 'no', no: 'na', na: 'empty' }[gridState[key] || 'empty'];
-    setGridState(prev => ({ ...prev, [key]: next === 'empty' ? undefined : next }));
+  const toggle = (habitId) => {
+    const today = new Date().toISOString().split('T')[0];
+    const key = `${habitId}_${today}`;
+    const next = { empty: 'yes', yes: 'no', no: 'na', na: 'empty' }[gridData[key] || 'empty'];
+    setGridData({ ...gridData, [key]: next === 'empty' ? undefined : next });
   };
 
   return (
-    <div className="p-3 max-w-sm mx-auto font-sans bg-white min-h-screen">
-      <h1 className="text-xl font-bold mb-4 text-slate-800">My Habits</h1>
-      
-      <div className="shadow-sm border rounded-xl overflow-hidden">
-        <table className="w-full border-collapse">
-          <thead className="bg-slate-50">
-            <tr>
-              <th className="p-3 border-b sticky left-0 bg-slate-50 z-10 text-left w-24">Habit</th>
-              {dates.map(d => <th key={d.id} className="p-3 border-b text-center">{d.display}</th>)}
-            </tr>
-          </thead>
-          <tbody>
-            {HABIT_STRUCTURE.map((item) => (
-              item.type === 'group' ? (
-                <React.Fragment key={item.id}>
-                  <tr className="bg-slate-100 font-bold text-[10px] uppercase text-slate-500">
-                    <td colSpan={dates.length + 1} className="px-3 py-1">{item.label}</td>
-                  </tr>
-                  {item.children.map(child => (
-                    <HabitRow key={child.id} item={child} dates={dates} onClick={handleCellClick} gridState={gridState} />
-                  ))}
-                </React.Fragment>
-              ) : (
-                <HabitRow key={item.id} item={item} dates={dates} onClick={handleCellClick} gridState={gridState} />
-              )
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <p className="text-xs text-slate-400 mt-4 text-center">Tap cells to cycle status</p>
+    <div className="min-h-screen bg-slate-50 pb-20">
+      <header className="bg-white p-4 border-b shadow-sm sticky top-0 z-10">
+        <h1 className="text-xl font-bold text-slate-800">HabitFlow</h1>
+      </header>
+
+      <main className="p-4">
+        {view === 'input' && <InputView onToggle={toggle} data={gridData} />}
+        {view === 'recent' && <RecentView data={gridData} />}
+        {view === 'stats' && <StatsView data={gridData} />}
+      </main>
+
+      <nav className="fixed bottom-0 w-full bg-white border-t flex justify-around p-3 shadow-lg z-20">
+        <button onClick={() => setView('input')} className={view === 'input' ? 'text-emerald-600' : 'text-slate-400'}><Edit3 size={24} /></button>
+        <button onClick={() => setView('recent')} className={view === 'recent' ? 'text-emerald-600' : 'text-slate-400'}><Calendar size={24} /></button>
+        <button onClick={() => setView('stats')} className={view === 'stats' ? 'text-emerald-600' : 'text-slate-400'}><BarChart3 size={24} /></button>
+      </nav>
     </div>
   );
 }
 
-function HabitRow({ item, dates, onClick, gridState }) {
+function InputView({ onToggle, data }) {
+  const today = new Date().toISOString().split('T')[0];
   return (
-    <tr>
-      <td className="p-3 border-b sticky left-0 bg-white z-10 font-medium text-slate-700 text-sm">
-        {item.label}
-      </td>
-      {dates.map(date => {
-        const state = gridState[`${item.id}_${date.id}`] || 'empty';
-        const colors = { empty: 'bg-slate-100', yes: 'bg-emerald-500', no: 'bg-red-500', na: 'bg-gray-400' };
-        return (
-          <td key={date.id} className="p-2 border-b">
-            <button 
-              onClick={() => onClick(item.id, date.id)}
-              className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all ${colors[state]}`}
-            >
-              {state === 'yes' && <Check size={20} className="text-white" />}
-              {state === 'no' && <X size={20} className="text-white" />}
-              {state === 'na' && <Minus size={20} className="text-white" />}
-            </button>
-          </td>
-        );
-      })}
-    </tr>
+    <div className="space-y-3">
+      <h2 className="text-lg font-semibold mb-2">Today: {today}</h2>
+      {HABITS.map(h => (
+        <div key={h.id} className="bg-white p-4 rounded-xl shadow-sm border flex justify-between items-center">
+          <span className="font-medium text-slate-700">{h.label}</span>
+          <button 
+            onClick={() => onToggle(h.id)}
+            className={`w-12 h-12 rounded-lg flex items-center justify-center text-white font-bold
+              ${(data[`${h.id}_${today}`] === 'yes') ? 'bg-emerald-500' : 
+                (data[`${h.id}_${today}`] === 'no') ? 'bg-red-500' : 'bg-slate-200'}`}
+          >
+            {data[`${h.id}_${today}`] === 'yes' ? <Check /> : data[`${h.id}_${today}`] === 'no' ? <X /> : <Minus />}
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function RecentView({ data }) {
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-white p-4 rounded-xl border shadow-sm">
+        <label className="block text-sm font-medium text-slate-500 mb-2">Select Date</label>
+        <input 
+          type="date" 
+          value={selectedDate} 
+          onChange={(e) => setSelectedDate(e.target.value)}
+          className="w-full p-3 border rounded-lg bg-slate-50"
+        />
+      </div>
+
+      <div className="bg-white p-4 rounded-xl border shadow-sm">
+        <h3 className="font-bold mb-4 text-slate-700 border-b pb-2">{selectedDate}</h3>
+        <div className="grid grid-cols-1 gap-2">
+          {HABITS.map(h => (
+            <div key={h.id} className="text-sm p-3 bg-slate-50 rounded flex justify-between items-center">
+              <span className="font-medium text-slate-700">{h.label}</span>
+              <span className={`px-2 py-1 rounded font-bold uppercase ${data[`${h.id}_${selectedDate}`] === 'yes' ? 'bg-emerald-100 text-emerald-700' : 'text-slate-400'}`}>
+                {data[`${h.id}_${selectedDate}`] || '-'}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatsView({ data }) {
+  const [selectedHabit, setSelectedHabit] = useState(HABITS[0].id);
+  const chartData = [{ name: 'Mon', v: 0.8 }, { name: 'Tue', v: 0.9 }, { name: 'Wed', v: 0.6 }, { name: 'Thu', v: 0.8 }, { name: 'Fri', v: 1.0 }, { name: 'Sat', v: 0.7 }, { name: 'Sun', v: 0.9 }];
+
+  return (
+    <div className="bg-white p-6 rounded-xl border shadow-sm space-y-4">
+      <h2 className="text-xl font-bold text-slate-800">Analytics</h2>
+      <select className="w-full p-3 border rounded-lg bg-slate-50" onChange={(e) => setSelectedHabit(e.target.value)}>
+        {HABITS.map(h => <option key={h.id} value={h.id}>{h.label}</option>)}
+      </select>
+      <div className="h-64 w-full">
+        <ResponsiveContainer>
+          <LineChart data={chartData}>
+            <XAxis dataKey="name" />
+            <YAxis />
+            <Tooltip />
+            <Line type="monotone" dataKey="v" stroke="#10b981" strokeWidth={4} />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
   );
 }
