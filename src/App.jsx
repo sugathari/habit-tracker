@@ -1,65 +1,84 @@
-import React, { useState } from 'react';
-import { Check, X, Minus, BarChart3, Edit3, Calendar } from 'lucide-react';
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import React, { useState, useEffect } from 'react';
+import { Check, X, Minus, Calendar, Edit3, BarChart3, ChevronLeft, ChevronRight, Loader2, Save } from 'lucide-react';
 
-const HABITS = [
-  { id: 'sleep', label: '6hrs+ Sleep' },
-  { id: 'walk_m', label: 'Morning Walk' },
-  { id: 'walk_a', label: 'Afternoon Walk' },
-  { id: 'walk_e', label: 'Evening Walk' },
-  { id: 'steps', label: '6k Steps' },
-  { id: 'meal_b', label: 'Breakfast' },
-  { id: 'meal_l', label: 'Lunch' },
-  { id: 'meal_d', label: 'Dinner' }
-];
+// Use the CDN-hosted Supabase library
+// Ensure you have loaded: https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js
+const { createClient } = window.supabase;
+
+const SUPABASE_URL = 'https://pvhuqpjpxpepxagruxpo.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_MJe9WzgqBoyAg69bOdVujA_B6lecN2k';
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+const HABITS = ['Sleep', 'Walk Morning', 'Walk Afternoon', 'Walk Evening', 'Steps', 'Breakfast', 'Lunch', 'Dinner'];
 
 export default function App() {
   const [view, setView] = useState('input');
-  const [gridData, setGridData] = useState({});
+  const [data, setData] = useState({});
+  const [loading, setLoading] = useState(true);
+  const today = new Date().toISOString().split('T')[0];
 
-  const toggle = (habitId) => {
-    const today = new Date().toISOString().split('T')[0];
-    const key = `${habitId}_${today}`;
-    const next = { empty: 'yes', yes: 'no', no: 'na', na: 'empty' }[gridData[key] || 'empty'];
-    setGridData({ ...gridData, [key]: next === 'empty' ? undefined : next });
+  useEffect(() => {
+    async function fetchData() {
+      const { data: logs, error } = await supabase.from('habit_logs').select('*');
+      if (!error && logs) {
+        const formatted = {};
+        logs.forEach(l => formatted[`${l.habit_id}_${l.date}`] = l.status);
+        setData(formatted);
+      }
+      setLoading(false);
+    }
+    fetchData();
+  }, []);
+
+  const toggle = async (habitId, date) => {
+    const key = `${habitId}_${date}`;
+    const current = data[key] || 'empty';
+    const next = { empty: 'yes', yes: 'no', no: 'na', na: 'empty' }[current];
+    
+    setData(prev => ({ ...prev, [key]: next === 'empty' ? null : next }));
+
+    if (next === 'empty') {
+      await supabase.from('habit_logs').delete().match({ habit_id: habitId, date: date });
+    } else {
+      await supabase.from('habit_logs').upsert({ habit_id: habitId, date: date, status: next });
+    }
   };
+
+  if (loading) return <div className="p-10 text-center"><Loader2 className="animate-spin mx-auto text-blue-500" /></div>;
 
   return (
     <div className="min-h-screen bg-slate-50 pb-20">
-      <header className="bg-white p-4 border-b shadow-sm sticky top-0 z-10">
+      <header className="bg-white p-4 border-b shadow-sm sticky top-0 z-10 flex items-center justify-between">
         <h1 className="text-xl font-bold text-slate-800">HabitFlow</h1>
+        <Save size={20} className="text-green-600" />
       </header>
-
       <main className="p-4">
-        {view === 'input' && <InputView onToggle={toggle} data={gridData} />}
-        {view === 'recent' && <RecentView data={gridData} />}
-        {view === 'stats' && <StatsView data={gridData} />}
+        {view === 'input' && <InputView onToggle={toggle} data={data} today={today} />}
+        {view === 'recent' && <RecentView data={data} />}
       </main>
-
-      <nav className="fixed bottom-0 w-full bg-white border-t flex justify-around p-3 shadow-lg z-20">
-        <button onClick={() => setView('input')} className={view === 'input' ? 'text-emerald-600' : 'text-slate-400'}><Edit3 size={24} /></button>
-        <button onClick={() => setView('recent')} className={view === 'recent' ? 'text-emerald-600' : 'text-slate-400'}><Calendar size={24} /></button>
-        <button onClick={() => setView('stats')} className={view === 'stats' ? 'text-emerald-600' : 'text-slate-400'}><BarChart3 size={24} /></button>
+      <nav className="fixed bottom-0 w-full bg-white border-t flex justify-around p-3 shadow-lg">
+        <button onClick={() => setView('input')} className={`p-2 ${view === 'input' ? 'text-blue-600' : 'text-slate-400'}`}><Edit3 /></button>
+        <button onClick={() => setView('recent')} className={`p-2 ${view === 'recent' ? 'text-blue-600' : 'text-slate-400'}`}><Calendar /></button>
       </nav>
     </div>
   );
 }
 
-function InputView({ onToggle, data }) {
-  const today = new Date().toISOString().split('T')[0];
+function InputView({ onToggle, data, today }) {
   return (
-    <div className="space-y-3">
-      <h2 className="text-lg font-semibold mb-2">Today: {today}</h2>
+    <div className="space-y-4">
+      <h2 className="font-bold text-lg text-slate-700">Today {today}</h2>
       {HABITS.map(h => (
-        <div key={h.id} className="bg-white p-4 rounded-xl shadow-sm border flex justify-between items-center">
-          <span className="font-medium text-slate-700">{h.label}</span>
+        <div key={h} className="bg-white p-4 rounded-xl shadow-sm flex items-center justify-between border border-slate-100">
+          <span className="font-medium text-slate-700">{h}</span>
           <button 
-            onClick={() => onToggle(h.id)}
-            className={`w-12 h-12 rounded-lg flex items-center justify-center text-white font-bold
-              ${(data[`${h.id}_${today}`] === 'yes') ? 'bg-emerald-500' : 
-                (data[`${h.id}_${today}`] === 'no') ? 'bg-red-500' : 'bg-slate-200'}`}
+            onClick={() => onToggle(h, today)} 
+            className={`w-12 h-12 flex items-center justify-center rounded-full transition-colors ${
+              data[`${h}_${today}`] === 'yes' ? 'bg-emerald-500 text-white' : 
+              data[`${h}_${today}`] === 'no' ? 'bg-red-500 text-white' : 'bg-slate-100 text-slate-400'
+            }`}
           >
-            {data[`${h.id}_${today}`] === 'yes' ? <Check /> : data[`${h.id}_${today}`] === 'no' ? <X /> : <Minus />}
+            {data[`${h}_${today}`] === 'yes' ? <Check size={24} /> : data[`${h}_${today}`] === 'no' ? <X size={24} /> : <Minus size={24} />}
           </button>
         </div>
       ))}
@@ -68,57 +87,5 @@ function InputView({ onToggle, data }) {
 }
 
 function RecentView({ data }) {
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
-
-  return (
-    <div className="space-y-4">
-      <div className="bg-white p-4 rounded-xl border shadow-sm">
-        <label className="block text-sm font-medium text-slate-500 mb-2">Select Date</label>
-        <input 
-          type="date" 
-          value={selectedDate} 
-          onChange={(e) => setSelectedDate(e.target.value)}
-          className="w-full p-3 border rounded-lg bg-slate-50"
-        />
-      </div>
-
-      <div className="bg-white p-4 rounded-xl border shadow-sm">
-        <h3 className="font-bold mb-4 text-slate-700 border-b pb-2">{selectedDate}</h3>
-        <div className="grid grid-cols-1 gap-2">
-          {HABITS.map(h => (
-            <div key={h.id} className="text-sm p-3 bg-slate-50 rounded flex justify-between items-center">
-              <span className="font-medium text-slate-700">{h.label}</span>
-              <span className={`px-2 py-1 rounded font-bold uppercase ${data[`${h.id}_${selectedDate}`] === 'yes' ? 'bg-emerald-100 text-emerald-700' : 'text-slate-400'}`}>
-                {data[`${h.id}_${selectedDate}`] || '-'}
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function StatsView({ data }) {
-  const [selectedHabit, setSelectedHabit] = useState(HABITS[0].id);
-  const chartData = [{ name: 'Mon', v: 0.8 }, { name: 'Tue', v: 0.9 }, { name: 'Wed', v: 0.6 }, { name: 'Thu', v: 0.8 }, { name: 'Fri', v: 1.0 }, { name: 'Sat', v: 0.7 }, { name: 'Sun', v: 0.9 }];
-
-  return (
-    <div className="bg-white p-6 rounded-xl border shadow-sm space-y-4">
-      <h2 className="text-xl font-bold text-slate-800">Analytics</h2>
-      <select className="w-full p-3 border rounded-lg bg-slate-50" onChange={(e) => setSelectedHabit(e.target.value)}>
-        {HABITS.map(h => <option key={h.id} value={h.id}>{h.label}</option>)}
-      </select>
-      <div className="h-64 w-full">
-        <ResponsiveContainer>
-          <LineChart data={chartData}>
-            <XAxis dataKey="name" />
-            <YAxis />
-            <Tooltip />
-            <Line type="monotone" dataKey="v" stroke="#10b981" strokeWidth={4} />
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
-    </div>
-  );
+  return <div className="p-4 text-center text-slate-500">History view functionality coming soon!</div>;
 }
