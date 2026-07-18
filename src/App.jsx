@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Check, X, Minus, RefreshCw } from 'lucide-react';
 
-// Define the structure of habits
 const HABIT_STRUCTURE = [
   { id: 'sleep', label: 'At least 6hrs of sleep', type: 'item' },
   { id: 'walks', label: 'Walks', type: 'group', children: [
@@ -9,114 +8,94 @@ const HABIT_STRUCTURE = [
     { id: 'walk_afternoon', label: 'Afternoon', type: 'item' },
     { id: 'walk_evening', label: 'Evening', type: 'item' },
   ]},
-  { id: 'steps', label: 'At least 6k steps in a day', type: 'item' },
-  { id: 'meals', label: 'Meals Cooked At Home', type: 'group', children: [
+  { id: 'steps', label: 'At least 6k steps', type: 'item' },
+  { id: 'meals', label: 'Meals Cooked', type: 'group', children: [
     { id: 'meal_breakfast', label: 'Breakfast', type: 'item' },
     { id: 'meal_lunch', label: 'Lunch', type: 'item' },
     { id: 'meal_dinner', label: 'Dinner', type: 'item' },
   ]}
 ];
 
-// Helper to generate the last N days in DD/MM format
 const generateLastNDays = (n) => {
   const dates = [];
   for (let i = n - 1; i >= 0; i--) {
     const d = new Date();
     d.setDate(d.getDate() - i);
-    const day = String(d.getDate()).padStart(2, '0');
-    const month = String(d.getMonth() + 1).padStart(2, '0');
     dates.push({
-      id: `${d.getFullYear()}-${month}-${day}`,
-      display: `${day}/${month}`
+      id: d.toISOString().split('T')[0],
+      display: `${d.getDate()}/${d.getMonth() + 1}`
     });
   }
   return dates;
 };
 
 export default function App() {
-  const [dates, setDates] = useState([]);
+  const [dates, setDates] = useState(generateLastNDays(7));
   const [gridState, setGridState] = useState({});
 
-  useEffect(() => {
-    setDates(generateLastNDays(7));
-  }, []);
-
   const handleCellClick = (habitId, dateId) => {
-    const cellKey = `${habitId}_${dateId}`;
-    const currentState = gridState[cellKey] || 'empty';
-    
-    let nextState;
-    switch (currentState) {
-      case 'empty': nextState = 'yes'; break;
-      case 'yes': nextState = 'no'; break;
-      case 'no': nextState = 'na'; break;
-      case 'na': nextState = 'empty'; break;
-      default: nextState = 'yes';
-    }
-
-    setGridState(prev => ({
-      ...prev,
-      [cellKey]: nextState === 'empty' ? undefined : nextState
-    }));
-  };
-
-  const HabitCell = ({ habitId, dateId }) => {
-    const state = gridState[`${habitId}_${dateId}`] || 'empty';
-    
-    let bgColor = 'bg-slate-100 hover:bg-slate-200';
-    let content = null;
-
-    if (state === 'yes') { bgColor = 'bg-emerald-500 hover:bg-emerald-600'; content = <Check size={16} className="text-white" />; }
-    else if (state === 'no') { bgColor = 'bg-red-500 hover:bg-red-600'; content = <X size={16} className="text-white" />; }
-    else if (state === 'na') { bgColor = 'bg-gray-400 hover:bg-gray-500'; content = <Minus size={16} className="text-white" />; }
-
-    return (
-      <td className="p-1 border border-slate-200 h-12 min-w-[3rem]">
-        <button 
-          onClick={() => handleCellClick(habitId, dateId)} 
-          className={`w-full h-full flex items-center justify-center rounded ${bgColor}`}
-        >
-          {content}
-        </button>
-      </td>
-    );
+    const key = `${habitId}_${dateId}`;
+    const next = { empty: 'yes', yes: 'no', no: 'na', na: 'empty' }[gridState[key] || 'empty'];
+    setGridState(prev => ({ ...prev, [key]: next === 'empty' ? undefined : next }));
   };
 
   return (
-    <div className="p-8 font-sans max-w-4xl mx-auto">
-      <h1 className="text-2xl font-bold mb-6 text-slate-800">Habit Grid</h1>
-      <div className="overflow-x-auto">
-        <table className="w-full border-collapse">
-          <thead>
+    <div className="p-4 max-w-lg mx-auto font-sans">
+      <h1 className="text-xl font-bold mb-4 text-slate-800">Habit Tracker</h1>
+      
+      {/* Scrollable Container */}
+      <div className="overflow-x-auto shadow-sm border rounded-lg">
+        <table className="w-full border-collapse text-sm">
+          <thead className="bg-slate-50">
             <tr>
-              <th className="p-3 border bg-slate-50 text-left">Habit</th>
-              {dates.map(date => <th key={date.id} className="p-3 border bg-slate-50">{date.display}</th>)}
+              <th className="p-2 border-b sticky left-0 bg-slate-50 z-10 text-left min-w-[120px]">Habit</th>
+              {dates.map(d => <th key={d.id} className="p-2 border-b text-center min-w-[40px]">{d.display}</th>)}
             </tr>
           </thead>
           <tbody>
             {HABIT_STRUCTURE.map((item) => (
               item.type === 'group' ? (
                 <React.Fragment key={item.id}>
-                  <tr className="bg-slate-100">
-                    <td colSpan={dates.length + 1} className="p-3 font-bold text-slate-700">{item.label}</td>
+                  <tr className="bg-slate-100 font-bold text-xs uppercase text-slate-500">
+                    <td colSpan={dates.length + 1} className="p-2">{item.label}</td>
                   </tr>
                   {item.children.map(child => (
-                    <tr key={child.id}>
-                      <td className="p-3 border pl-8">{child.label}</td>
-                      {dates.map(date => <HabitCell key={`${child.id}_${date.id}`} habitId={child.id} dateId={date.id} />)}
-                    </tr>
+                    <HabitRow key={child.id} item={child} dates={dates} onClick={handleCellClick} gridState={gridState} />
                   ))}
                 </React.Fragment>
               ) : (
-                <tr key={item.id}>
-                  <td className="p-3 border font-medium text-slate-700">{item.label}</td>
-                  {dates.map(date => <HabitCell key={`${item.id}_${date.id}`} habitId={item.id} dateId={date.id} />)}
-                </tr>
+                <HabitRow key={item.id} item={item} dates={dates} onClick={handleCellClick} gridState={gridState} />
               )
             ))}
           </tbody>
         </table>
       </div>
     </div>
+  );
+}
+
+function HabitRow({ item, dates, onClick, gridState }) {
+  return (
+    <tr>
+      <td className="p-2 border-b sticky left-0 bg-white z-10 font-medium text-slate-700 truncate max-w-[120px]">
+        {item.label}
+      </td>
+      {dates.map(date => {
+        const state = gridState[`${item.id}_${date.id}`] || 'empty';
+        const colors = { empty: 'bg-slate-100', yes: 'bg-emerald-500', no: 'bg-red-500', na: 'bg-gray-400' };
+        return (
+          <td key={date.id} className="p-1 border-b">
+            <button 
+              onClick={() => onClick(item.id, date.id)}
+              className={`w-8 h-8 rounded flex items-center justify-center ${colors[state]}`}
+            >
+              {state === 'yes' && <Check size={14} className="text-white" />}
+              {state === 'no' && <X size={14} className="text-white" />}
+              {state === 'na' && <Minus size={14} className="text-white" />}
+            </button>
+          </td>
+        );
+      })}
+    </tr>
   );
 }
