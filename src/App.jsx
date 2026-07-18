@@ -54,7 +54,7 @@ export default function App() {
           const savedUrl = localStorage.getItem('supabase_url') || 'https://pvhuqpjpxpepxagruxpo.supabase.co';
           const savedKey = localStorage.getItem('supabase_key') || 'sb_publishable_MJe9WzgqBoyAg69bOdVujA_B6lecN2k';
           
-          if (savedUrl === 'YOUR_SUPABASE_PROJECT_URL') {
+          if (savedUrl === 'https://pvhuqpjpxpepxagruxpo.supabase.co') {
             setSyncStatus('Local Sandbox Mode');
             setLoading(false);
             return;
