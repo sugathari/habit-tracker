@@ -1,590 +1,553 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  Check, 
-  X, 
-  Minus, 
-  Edit3, 
-  Calendar, 
-  BarChart3, 
-  Loader2, 
-  ChevronLeft, 
-  ChevronRight,
-  Database,
-  CheckCircle,
-  HelpCircle,
-  TrendingUp,
-  Award
-} from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Edit3, Calendar, Check, X, Minus, Loader2, Utensils, Footprints, Moon, Sun, Sunset, Briefcase, Home, Plane, RefreshCw } from 'lucide-react';
 
-const MY_HABITS = [
-  { id: 'sleep', label: '6+ hours of sleep', type: 'simple' },
-  { 
-    id: 'walks', 
-    label: 'Walks', 
-    type: 'group', 
-    children: [
-      { id: 'walk_morning', label: 'Morning Walk' },
-      { id: 'walk_afternoon', label: 'Afternoon Walk' },
-      { id: 'walk_evening', label: 'Evening Walk' }
-    ] 
-  },
-  { id: 'steps', label: '6k+ steps', type: 'simple' },
-  { 
-    id: 'meals', 
-    label: 'Meals Cooked At Home', 
-    type: 'group', 
-    children: [
-      { id: 'meal_breakfast', label: 'Breakfast cooked' },
-      { id: 'meal_lunch', label: 'Lunch cooked' },
-      { id: 'meal_dinner', label: 'Dinner cooked' }
-    ] 
-  }
+// 1. FIXED CONFIGURATION ARRAYS
+const CORE_GOALS = [
+  { id: 'sleep', label: '6+ Hours of Sleep', icon: <Moon size={18} className="text-indigo-500" /> },
+  { id: 'steps', label: '6k+ Steps', icon: <Footprints size={18} className="text-emerald-500" /> }
 ];
 
-// Flat list helper for quick queries and analytics
-const getAllHabitIds = (habits) => {
-  let ids = [];
-  habits.forEach(h => {
-    if (h.type === 'group') {
-      h.children.forEach(c => ids.push({ id: c.id, label: c.label }));
-    } else {
-      ids.push({ id: h.id, label: h.label });
-    }
-  });
-  return ids;
+const WALK_TASKS = [
+  { id: 'walk_morning', label: 'Morning Walk', icon: <Sun size={16} className="text-amber-500" /> },
+  { id: 'walk_afternoon', label: 'Afternoon Walk', icon: <Sun size={16} className="text-orange-500" /> },
+  { id: 'walk_evening', label: 'Evening Walk', icon: <Sunset size={16} className="text-indigo-400" /> }
+];
+
+const MEAL_TASKS = [
+  { id: 'meal_breakfast', label: 'Breakfast' },
+  { id: 'meal_lunch', label: 'Lunch' },
+  { id: 'meal_dinner', label: 'Dinner' }
+];
+
+// Helper to get YYYY-MM-DD in local time string
+const formatDateString = (date) => {
+  const offset = date.getTimezoneOffset();
+  const localDate = new Date(date.getTime() - (offset * 60 * 1000));
+  return localDate.toISOString().split('T')[0];
 };
 
-const HABIT_FLAT_LIST = getAllHabitIds(MY_HABITS);
-
-// -------------------------------------------------------------
-// SUPABASE CLIENT INITIALIZATION CONFIGURATION
-// Replace these with your actual Supabase dashboard credentials!
-// -------------------------------------------------------------
-const SUPABASE_URL = 'https://pvhuqpjpxpepxagruxpo.supabase.co';
-const SUPABASE_KEY = 'sb_publishable_MJe9WzgqBoyAg69bOdVujA_B6lecN2k';
-
 export default function App() {
+  // Navigation & Date States
   const [activeTab, setActiveTab] = useState('input');
-  const [supabaseClient, setSupabaseClient] = useState(null);
-  const [dbStatus, setDbStatus] = useState('initializing'); // 'initializing', 'local-demo', 'connected'
+  const [selectedDate, setSelectedDate] = useState(formatDateString(new Date()));
   
-  // Format dates consistently as 'YYYY-MM-DD'
-  const getTodayDateString = () => {
-    const d = new Date();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${d.getFullYear()}-${month}-${day}`;
-  };
-
-  const [selectedDate, setSelectedDate] = useState(getTodayDateString());
-  const [data, setData] = useState({}); // Stores key format: { 'YYYY-MM-DD_habitId': 'yes' | 'no' | 'na' | 'empty' }
+  // Database & App States
+  const [supabase, setSupabase] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [syncStatus, setSyncStatus] = useState('Connecting...');
+  
+  // Main Data States mapped by date string: { "YYYY-MM-DD": { ...logs } }
+  const [allLogs, setAllLogs] = useState({});
+  const [journalText, setJournalText] = useState('');
+  const [savingJournal, setSavingJournal] = useState(false);
+  
+  const journalDebounceTimeout = useRef(null);
+  const todayStr = formatDateString(new Date());
 
+  // 2. RUNTIME CDN SUPABASE LOADER
   useEffect(() => {
-    const loadSupabaseLibrary = async () => {
-      try {
-        // If already loaded in window
-        if (window.supabase) {
-          initializeClient();
-          return;
+    const checkSupabase = setInterval(() => {
+      if (window.supabase) {
+        clearInterval(checkSupabase);
+        try {
+          // Pull keys from localStorage if saved via dynamic setup, or fallback to window constants
+          const savedUrl = localStorage.getItem('supabase_url') || 'https://pvhuqpjpxpepxagruxpo.supabase.co';
+          const savedKey = localStorage.getItem('supabase_key') || 'sb_publishable_MJe9WzgqBoyAg69bOdVujA_B6lecN2k';
+          
+          if (savedUrl === 'YOUR_SUPABASE_PROJECT_URL') {
+            setSyncStatus('Local Sandbox Mode');
+            setLoading(false);
+            return;
+          }
+
+          const client = window.supabase.createClient(savedUrl, savedKey);
+          setSupabase(client);
+          setSyncStatus('Cloud Synced');
+          fetchHistoricalLogs(client);
+        } catch (err) {
+          console.error("Supabase config error:", err);
+          setSyncStatus('Config Error');
+          setLoading(false);
         }
-
-        // Programmatically inject Supabase UMD library script from secure CDN
-        const script = document.createElement('script');
-        script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js';
-        script.async = true;
-        script.onload = () => {
-          initializeClient();
-        };
-        script.onerror = () => {
-          console.warn("Supabase CDN script failed to load. Defaulting to local Storage mode.");
-          setDbStatus('local-demo');
-          loadLocalFallback();
-        };
-        document.head.appendChild(script);
-      } catch (err) {
-        console.error("Dynamic script load error: ", err);
-        setDbStatus('local-demo');
-        loadLocalFallback();
       }
-    };
+    }, 100);
 
-    const initializeClient = () => {
-      // Validate credentials
-      if (
-        !SUPABASE_URL || 
-        SUPABASE_URL === 'YOUR_SUPABASE_URL' || 
-        !SUPABASE_KEY || 
-        SUPABASE_KEY === 'YOUR_SUPABASE_ANON_KEY'
-      ) {
-        console.warn("Using local Storage fallback. Enter your valid Supabase Credentials in App.jsx to enable Syncing.");
-        setDbStatus('local-demo');
-        loadLocalFallback();
-        return;
+    setTimeout(() => {
+      if (!window.supabase) {
+        clearInterval(checkSupabase);
+        setSyncStatus('Offline Sandbox');
+        setLoading(false);
       }
-
-      try {
-        if (window.supabase) {
-          const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-          setSupabaseClient(client);
-          setDbStatus('connected');
-          fetchDatabaseLogs(client);
-        } else {
-          setDbStatus('local-demo');
-          loadLocalFallback();
-        }
-      } catch (error) {
-        console.error("Failed to build Supabase Client instance: ", error);
-        setDbStatus('local-demo');
-        loadLocalFallback();
-      }
-    };
-
-    loadSupabaseLibrary();
+    }, 4000);
   }, []);
 
-  const loadLocalFallback = () => {
+  // 3. FETCH DATABASE PROGRESS LOGS
+  const fetchHistoricalLogs = async (client) => {
     try {
-      const cached = localStorage.getItem('habitflow_cache');
-      if (cached) {
-        setData(JSON.parse(cached));
-      }
-    } catch (e) {
-      console.error("Error reading cache: ", e);
-    }
-    setLoading(false);
-  };
-
-  const fetchDatabaseLogs = async (clientInstance) => {
-    try {
-      const { data: logs, error } = await clientInstance
+      const { data, error } = await client
         .from('habit_logs')
-        .select('*');
+        .select('*')
+        .order('log_date', { ascending: false });
 
       if (error) throw error;
 
-      if (logs) {
-        // Remap to app structure { `${date}_${habit_id}`: status }
-        const mappedData = {};
-        logs.forEach(log => {
-          mappedData[`${log.date}_${log.habit_id}`] = log.status;
+      if (data) {
+        const parsedLogs = {};
+        data.forEach(row => {
+          parsedLogs[row.log_date] = {
+            ...row.metrics,
+            day_context: row.day_context || 'home',
+            journal_entry: row.journal_entry || ''
+          };
         });
-        setData(mappedData);
-        // Sync local storage as well for fast load times later
-        localStorage.setItem('habitflow_cache', JSON.stringify(mappedData));
+        setAllLogs(parsedLogs);
+        
+        // Sync initial text box state to currently targeted date
+        if (parsedLogs[selectedDate]?.journal_entry) {
+          setJournalText(parsedLogs[selectedDate].journal_entry);
+        }
       }
     } catch (err) {
-      console.error("Database fetch failed. Using local cache instead: ", err);
-      loadLocalFallback();
+      console.error("Error reading database table rows:", err);
     } finally {
       setLoading(false);
     }
   };
 
-  const toggleHabit = async (habitId) => {
-    const stateKey = `${selectedDate}_${habitId}`;
-    const currentStatus = data[stateKey] || 'empty';
+  // Sync textbox input context gracefully when selected date moves
+  useEffect(() => {
+    setJournalText(allLogs[selectedDate]?.journal_entry || '');
+  }, [selectedDate, allLogs]);
+
+  // 4. PERSIST AND UPSERT METRICS DATA CHANGES
+  const updateDayData = async (dateKey, updatedFields) => {
+    const currentDayData = allLogs[dateKey] || { day_context: 'home', journal_entry: '' };
+    const cleanDayData = { ...currentDayData, ...updatedFields };
     
-    // Cycle: empty -> yes -> no -> na -> empty
-    let nextStatus = 'empty';
-    if (currentStatus === 'empty') nextStatus = 'yes';
-    else if (currentStatus === 'yes') nextStatus = 'no';
-    else if (currentStatus === 'no') nextStatus = 'na';
+    // Optimistic UI state adjustment
+    setAllLogs(prev => ({
+      ...prev,
+      [dateKey]: cleanDayData
+    }));
 
-    // Update state instantly for fluid UX (Optimistic State Update)
-    const updatedData = { ...data, [stateKey]: nextStatus };
-    setData(updatedData);
-    localStorage.setItem('habitflow_cache', JSON.stringify(updatedData));
+    if (!supabase) return; // Keep sandbox dynamic features intact without crashing
 
-    // Save changes downstream to database if active
-    if (dbStatus === 'connected' && supabaseClient) {
-      try {
-        const { error } = await supabaseClient
-          .from('habit_logs')
-          .upsert({
-            habit_id: habitId,
-            date: selectedDate,
-            status: nextStatus
-          }, { onConflict: 'habit_id,date' });
+    try {
+      setSyncStatus('Syncing changes...');
+      const { error } = await supabase
+        .from('habit_logs')
+        .upsert({
+          log_date: dateKey,
+          day_context: cleanDayData.day_context,
+          journal_entry: cleanDayData.journal_entry,
+          metrics: Object.keys(cleanDayData).reduce((acc, k) => {
+            if (k !== 'day_context' && k !== 'journal_entry') acc[k] = cleanDayData[k];
+            return acc;
+          }, {})
+        }, { onConflict: 'log_date' });
 
-        if (error) {
-          console.warn("Could not save to Supabase database. Double-check your RLS policies or schemas.", error);
-        }
-      } catch (err) {
-        console.error("Supabase upsert error: ", err);
-      }
+      if (error) throw error;
+      setSyncStatus('Cloud Synced');
+    } catch (err) {
+      console.error("Failed to commit data changes to cloud state:", err);
+      setSyncStatus('Connection Interrupted');
     }
   };
 
-  // Move Selected Date forward or backward
-  const offsetDate = (days) => {
-    const current = new Date(selectedDate + 'T00:00:00');
-    current.setDate(current.getDate() + days);
-    const month = String(current.getMonth() + 1).padStart(2, '0');
-    const day = String(current.getDate()).padStart(2, '0');
-    setSelectedDate(`${current.getFullYear()}-${month}-${day}`);
-  };
+  // 5. DEBOUNCED TEXT JOURNAL WRITER
+  const handleJournalChange = (text) => {
+    setJournalText(text);
+    setSavingJournal(true);
 
-  // Helper to format date display headers
-  const getReadableDateHeader = (dateStr) => {
-    const options = { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' };
-    const dateObj = new Date(dateStr + 'T00:00:00');
-    return dateObj.toLocaleDateString('en-US', options);
-  };
+    if (journalDebounceTimeout.current) clearTimeout(journalDebounceTimeout.current);
 
-  const getQuickPickDates = () => {
-    const list = [];
-    const centerDate = new Date(selectedDate + 'T00:00:00');
-    
-    // Generate week viewport centered around selected date
-    for (let i = -3; i <= 3; i++) {
-      const clone = new Date(centerDate);
-      clone.setDate(centerDate.getDate() + i);
-      const m = String(clone.getMonth() + 1).padStart(2, '0');
-      const d = String(clone.getDate()).padStart(2, '0');
-      const key = `${clone.getFullYear()}-${m}-${d}`;
-      list.push({
-        key,
-        dayNum: clone.getDate(),
-        weekday: clone.toLocaleDateString('en-US', { weekday: 'narrow' }),
-        isToday: key === getTodayDateString()
+    journalDebounceTimeout.current = setTimeout(() => {
+      updateDayData(selectedDate, { journal_entry: text }).then(() => {
+        setSavingJournal(false);
       });
-    }
-    return list;
+    }, 1200);
   };
 
-  const renderHabitItem = (habit, depth = 0) => {
-    const stateKey = `${selectedDate}_${habit.id}`;
-    const status = data[stateKey] || 'empty';
+  // Helper selectors
+  const activeLogs = allLogs[selectedDate] || {};
+  const currentContext = activeLogs.day_context || 'home';
 
-    if (habit.type === 'group') {
-      return (
-        <div key={habit.id} className="space-y-2 mt-4">
-          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider pl-1">{habit.label}</h3>
-          <div className="space-y-2 pl-3 border-l-2 border-slate-100 dark:border-slate-800">
-            {habit.children.map(child => renderHabitItem(child, depth + 1))}
-          </div>
-        </div>
-      );
-    }
-
-    return (
-      <div 
-        key={habit.id} 
-        className="bg-white p-4 rounded-xl shadow-sm flex justify-between items-center border border-slate-100 transition-all duration-200 hover:border-slate-200"
-      >
-        <div className="flex flex-col">
-          <span className="font-semibold text-slate-800 text-sm md:text-base">{habit.label}</span>
-          <span className="text-[11px] text-slate-400">Tap to toggle logs</span>
-        </div>
-
-        <button 
-          onClick={() => toggleHabit(habit.id)}
-          className={`w-12 h-12 rounded-xl flex flex-col items-center justify-center transition-all duration-200 transform active:scale-95 shadow-sm ${
-            status === 'empty' ? 'bg-slate-50 border border-dashed border-slate-200 hover:bg-slate-100' :
-            status === 'yes' ? 'bg-emerald-500 text-white shadow-emerald-100' :
-            status === 'no' ? 'bg-red-500 text-white shadow-red-100' : 
-            'bg-slate-400 text-white'
-          }`}
-          title={`Status: ${status}`}
-        >
-          {status === 'yes' && <Check size={22} strokeWidth={2.5} />}
-          {status === 'no' && <X size={22} strokeWidth={2.5} />}
-          {status === 'na' && <Minus size={22} strokeWidth={2.5} />}
-          {status === 'empty' && <span className="text-slate-300 font-bold text-base">?</span>}
-        </button>
-      </div>
-    );
-  };
-
-  const calculateAnalytics = () => {
-    let totals = { yes: 0, no: 0, na: 0, empty: 0 };
-    let listCount = 0;
-
-    // We fetch analytics globally for all keys matching selected date
-    HABIT_FLAT_LIST.forEach(item => {
-      const val = data[`${selectedDate}_${item.id}`] || 'empty';
-      totals[val]++;
-      listCount++;
+  // 6. DECOUPLED STATS ALGORITHMS
+  const calculateDailyProgress = (dateStr) => {
+    const targetLogs = allLogs[dateStr] || {};
+    let matched = 0;
+    CORE_GOALS.forEach(g => {
+      if (targetLogs[g.id] === 'yes') matched++;
     });
-
-    const completed = totals.yes;
-    const applicable = listCount - totals.na;
-    const rate = applicable > 0 ? Math.round((completed / applicable) * 100) : 0;
-
-    return {
-      rate,
-      totals,
-      applicable
-    };
+    return { completed: matched, total: CORE_GOALS.length, pct: matched ? (matched / CORE_GOALS.length) * 100 : 0 };
   };
 
-  const currentStats = calculateAnalytics();
+  const getWeeklyAverage = () => {
+    let totals = 0;
+    for (let i = 0; i < 7; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      totals += calculateDailyProgress(formatDateString(d)).pct;
+    }
+    return Math.round(totals / 7);
+  };
+
+  // Formats historical arrays into specific blocks of 21 days (3-week intervals)
+  const getRollingBlockAverage = (blockNum) => {
+    let accumulated = 0;
+    const offsetStart = blockNum * 21;
+    for (let i = 0; i < 21; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() - (offsetStart + i));
+      accumulated += calculateDailyProgress(formatDateString(d)).pct;
+    }
+    return Math.round(accumulated / 21);
+  };
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center">
-        <Loader2 className="animate-spin text-blue-600 mb-2 w-8 h-8" />
-        <span className="text-sm font-medium text-slate-500">Connecting Database logs...</span>
+      <div className="flex h-screen items-center justify-center bg-slate-50 flex-col gap-3">
+        <Loader2 className="animate-spin text-indigo-600 w-10 h-10" />
+        <p className="text-sm font-medium text-slate-500">Loading HabitFlow Engine...</p>
       </div>
     );
   }
 
-  return (
-    <div className="min-h-screen bg-slate-50 pb-24 font-sans text-slate-800 antialiased selection:bg-blue-100">
-      
-      {/* HEADER BAR */}
-      <header className="sticky top-0 z-40 bg-white border-b border-slate-200/80 px-4 py-3 flex items-center justify-between shadow-sm">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center shadow-md shadow-blue-100 text-white font-bold text-lg">
-            H
-          </div>
-          <h1 className="text-xl font-extrabold tracking-tight text-slate-900">HabitFlow</h1>
-        </div>
+  // Generate localized 3-day strip dates
+  const dateStrip = [];
+  for (let i = 2; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    dateStrip.push({
+      key: formatDateString(d),
+      label: i === 0 ? '★ TODAY' : d.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric' })
+    });
+  }
 
-        {/* Sync Indicator Pill */}
-        <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${
-          dbStatus === 'connected' 
-            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
-            : 'bg-amber-50 text-amber-700 border border-amber-200'
-        }`}>
-          <Database size={13} />
-          <span>{dbStatus === 'connected' ? 'Cloud Synced' : 'Local Sandbox'}</span>
+  return (
+    <div className="min-h-screen bg-slate-50 pb-24 font-sans text-slate-800 antialiased">
+      {/* HEADER NAVBAR */}
+      <header className="sticky top-0 z-50 flex items-center justify-between border-b bg-white px-4 py-3 shadow-sm">
+        <h1 className="text-xl font-extrabold tracking-tight text-slate-900">HabitFlow <span className="text-indigo-600">⚡</span></h1>
+        <div className="flex items-center gap-2">
+          <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+            syncStatus.includes('Synced') ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-amber-50 text-amber-700 border border-amber-200'
+          }`}>
+            <span className={`h-1.5 w-1.5 rounded-full ${syncStatus.includes('Synced') ? 'bg-emerald-500' : 'bg-amber-400'}`} />
+            {syncStatus}
+          </span>
         </div>
       </header>
 
-      <main className="max-w-2xl mx-auto px-4 py-6 space-y-6">
+      <main className="mx-auto max-w-xl p-4">
+        {activeTab === 'input' ? (
+          <div className="space-y-5">
+            
+            {/* 1. DYNAMIC HEADER CARD: STATS GRID */}
+            <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400">Habit Strength & Kinetic Progress</h2>
+              
+              {/* Core Bar */}
+              <div className="mt-4">
+                <div className="flex justify-between text-sm font-bold mb-1">
+                  <span className="text-slate-700">Today's Goal Tracker</span>
+                  <span className="text-indigo-600">{calculateDailyProgress(selectedDate).pct}% ({calculateDailyProgress(selectedDate).completed} of 2 met)</span>
+                </div>
+                <div className="h-2.5 w-full rounded-full bg-slate-100 overflow-hidden">
+                  <div 
+                    className="h-full bg-indigo-600 transition-all duration-500 ease-out" 
+                    style={{ width: `${calculateDailyProgress(selectedDate).pct}%` }} 
+                  />
+                </div>
+              </div>
 
-        {/* CLOUD CONFIGURATION WARNING (If credentials are missing) */}
-        {dbStatus === 'local-demo' && (
-          <div className="bg-amber-50/70 border border-amber-100 rounded-xl p-4 text-xs text-amber-800 leading-relaxed space-y-1">
-            <div className="font-bold flex items-center gap-1">
-              <HelpCircle size={14} /> Cloud Sync Config Pending
-            </div>
-            <p>
-              Your habits are currently storing on your local browser. Paste your valid <strong>SUPABASE_URL</strong> and <strong>SUPABASE_KEY</strong> inside your <code>src/App.jsx</code> file to enable cloud sync.
-            </p>
-          </div>
-        )}
+              <div className="mt-4 flex justify-between border-t pt-3 text-xs text-slate-500">
+                <div>Weekly Average: <span className="font-bold text-slate-800">{getWeeklyAverage()}%</span></div>
+              </div>
 
-        {}
-        <section className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100/80 space-y-4">
-          <div className="flex items-center justify-between">
-            <button 
-              onClick={() => offsetDate(-1)}
-              className="p-2 rounded-lg hover:bg-slate-50 border border-slate-100 active:scale-95 transition-all text-slate-600"
-            >
-              <ChevronLeft size={18} />
-            </button>
+              {/* 3-Week Rolling blocks array */}
+              <div className="mt-4 border-t pt-3">
+                <span className="text-[11px] font-bold uppercase tracking-wide text-slate-400 block mb-2">3-Week Momentum Trend (Solidification Index)</span>
+                <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                  <div className="rounded-lg bg-slate-50 p-2 border">
+                    <span className="block text-slate-400 text-[10px]">Wks 7-9</span>
+                    <span className="font-bold text-slate-700">{getRollingBlockAverage(2)}%</span>
+                  </div>
+                  <div className="rounded-lg bg-slate-50 p-2 border">
+                    <span className="block text-slate-400 text-[10px]">Wks 4-6</span>
+                    <span className="font-bold text-slate-700">{getRollingBlockAverage(1)}%</span>
+                  </div>
+                  <div className="rounded-lg bg-indigo-50/50 p-2 border border-indigo-100">
+                    <span className="block text-indigo-500 font-semibold text-[10px]">Current Block</span>
+                    <span className="font-bold text-indigo-700">{getRollingBlockAverage(0)}%</span>
+                  </div>
+                </div>
+              </div>
+            </section>
 
-            <div className="text-center">
-              <h2 className="font-extrabold text-slate-900 text-base md:text-lg">
-                {getReadableDateHeader(selectedDate)}
-              </h2>
-              <p className="text-xs text-slate-400 mt-0.5">
-                {selectedDate === getTodayDateString() ? 'Today' : 'Viewing Log Archive'}
-              </p>
-            </div>
-
-            <button 
-              onClick={() => offsetDate(1)}
-              className="p-2 rounded-lg hover:bg-slate-50 border border-slate-100 active:scale-95 transition-all text-slate-600"
-            >
-              <ChevronRight size={18} />
-            </button>
-          </div>
-
-          {/* Quick-Pick week strip */}
-          <div className="grid grid-cols-7 gap-2 pt-2 border-t border-slate-50">
-            {getQuickPickDates().map((item) => (
-              <button
-                key={item.key}
-                onClick={() => setSelectedDate(item.key)}
-                className={`flex flex-col items-center py-2.5 rounded-xl transition-all duration-200 ${
-                  selectedDate === item.key
-                    ? 'bg-blue-600 text-white shadow-md shadow-blue-100 font-bold scale-105'
-                    : 'bg-slate-50/80 hover:bg-slate-100/50 text-slate-600'
-                }`}
-              >
-                <span className="text-[10px] uppercase font-bold opacity-75">{item.weekday}</span>
-                <span className="text-sm mt-0.5 font-semibold">{item.dayNum}</span>
-                {item.isToday && (
-                  <div className={`w-1 h-1 rounded-full mt-1 ${selectedDate === item.key ? 'bg-white' : 'bg-blue-600'}`} />
-                )}
-              </button>
-            ))}
-          </div>
-
-          {/* Direct Custom Calendar Date Input Scroller */}
-          <div className="flex items-center justify-between gap-4 pt-2 border-t border-slate-100">
-            <span className="text-xs font-semibold text-slate-400">Jump to custom date:</span>
-            <input 
-              type="date"
-              value={selectedDate}
-              onChange={(e) => {
-                if (e.target.value) {
-                  setSelectedDate(e.target.value);
-                }
-              }}
-              className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-600 bg-slate-50/50 focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
-            />
-          </div>
-        </section>
-
-        {/* TAB INTERFACES */}
-
-        {/* INPUT LOGGING VIEW */}
-        {activeTab === 'input' && (
-          <div className="space-y-4">
-            <div className="flex justify-between items-center px-1">
-              <h2 className="text-lg font-bold text-slate-900">Today's Goals</h2>
-              <span className="text-xs font-semibold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-md">
-                {currentStats.totals.yes} / {currentStats.applicable} Done
-              </span>
-            </div>
-
-            <div className="space-y-4">
-              {MY_HABITS.map(habit => renderHabitItem(habit))}
-            </div>
-          </div>
-        )}
-
-        {}
-        {activeTab === 'recent' && (
-          <div className="space-y-5 bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
-            <div>
-              <h2 className="text-lg font-extrabold text-slate-900">Search Calendar Log</h2>
-              <p className="text-xs text-slate-400 mt-1">Select a target date to see what was achieved on that day.</p>
-            </div>
-
-            <div className="p-4 bg-slate-50/80 rounded-xl space-y-3">
-              <label className="block text-xs font-bold text-slate-500 uppercase">Selected Archive Date</label>
-              <div className="flex gap-2">
+            {/* 2. TIMELINE STRIP FOCUS */}
+            <section className="flex items-center justify-between gap-1 bg-white p-2 border rounded-xl shadow-sm overflow-x-auto">
+              <div className="flex gap-1.5">
+                {dateStrip.map(d => (
+                  <button
+                    key={d.key}
+                    onClick={() => setSelectedDate(d.key)}
+                    className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                      selectedDate === d.key 
+                        ? 'bg-slate-900 text-white shadow-sm' 
+                        : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    {d.label}
+                  </button>
+                ))}
+              </div>
+              
+              <div className="flex items-center gap-1.5 pl-2 border-l">
                 <input 
-                  type="date"
+                  type="date" 
+                  max={todayStr}
                   value={selectedDate}
                   onChange={(e) => e.target.value && setSelectedDate(e.target.value)}
-                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none font-semibold text-slate-700"
+                  className="p-1 rounded bg-slate-100 text-slate-700 border text-xs cursor-pointer focus:outline-none focus:ring-1 focus:ring-indigo-500"
                 />
+                {selectedDate !== todayStr && (
+                  <button 
+                    onClick={() => setSelectedDate(todayStr)}
+                    className="p-1.5 text-xs text-indigo-600 hover:bg-indigo-50 rounded-lg font-bold flex items-center gap-0.5 transition-colors"
+                    title="Jump to Today"
+                  >
+                    <RefreshCw size={12} /> Today
+                  </button>
+                )}
               </div>
-            </div>
+            </section>
 
-            {/* Quick Summary card for chosen date */}
-            <div className="border border-slate-100 rounded-xl p-4">
-              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider block">Score for {getReadableDateHeader(selectedDate)}</span>
-              <div className="flex items-end justify-between mt-2">
-                <span className="text-4xl font-black text-blue-600">{currentStats.rate}%</span>
-                <span className="text-sm font-semibold text-slate-500">
-                  {currentStats.totals.yes} of {currentStats.applicable} completed
+            {/* 3. DYNAMIC DAY ENVIRONMENT CONTEXT SWITCH */}
+            <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2.5">Day Context Framework</h3>
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  onClick={() => updateDayData(selectedDate, { day_context: 'home' })}
+                  className={`flex items-center justify-center gap-1.5 py-2 text-xs font-bold rounded-lg border transition-all ${
+                    currentContext === 'home'
+                      ? 'bg-amber-50 text-amber-800 border-amber-300 shadow-sm'
+                      : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  <Home size={14} /> Home Day
+                </button>
+                <button
+                  onClick={() => updateDayData(selectedDate, { day_context: 'office' })}
+                  className={`flex items-center justify-center gap-1.5 py-2 text-xs font-bold rounded-lg border transition-all ${
+                    currentContext === 'office'
+                      ? 'bg-blue-50 text-blue-800 border-blue-300 shadow-sm'
+                      : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  <Briefcase size={14} /> Office Day
+                </button>
+                <button
+                  onClick={() => updateDayData(selectedDate, { day_context: 'travel' })}
+                  className={`flex items-center justify-center gap-1.5 py-2 text-xs font-bold rounded-lg border transition-all ${
+                    currentContext === 'travel'
+                      ? 'bg-purple-50 text-purple-800 border-purple-300 shadow-sm'
+                      : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  <Plane size={14} /> Travel Day
+                </button>
+              </div>
+            </section>
+
+            {/* 4. CORE OUTCOME STRIP (100% STAT DRIVING WEIGHT) */}
+            <section className="space-y-2">
+              <div className="px-1">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Core Outcome Goals</h3>
+              </div>
+              {CORE_GOALS.map(goal => {
+                const status = activeLogs[goal.id] || 'empty';
+                return (
+                  <div key={goal.id} className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm">
+                    <div className="flex items-center gap-2.5">
+                      {goal.icon}
+                      <span className="font-semibold text-slate-700 text-sm">{goal.label}</span>
+                    </div>
+                    <div className="flex gap-1 bg-slate-100 p-0.5 rounded-lg border">
+                      <button
+                        onClick={() => updateDayData(selectedDate, { [goal.id]: 'yes' })}
+                        className={`px-3 py-1 rounded-md text-xs font-bold transition-all ${
+                          status === 'yes' ? 'bg-emerald-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        YES
+                      </button>
+                      <button
+                        onClick={() => updateDayData(selectedDate, { [goal.id]: 'no' })}
+                        className={`px-3 py-1 rounded-md text-xs font-bold transition-all ${
+                          status === 'no' ? 'bg-red-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        NO
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </section>
+
+            {/* 5. BEHAVIORAL CONTEXT METADATA MATRIX (0% STAT WEIGHT) */}
+            <section className="space-y-3">
+              <div className="px-1 border-t pt-2">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Behavioral Context Logs</h3>
+              </div>
+
+              {/* WALKS MATRIX CONTAINER */}
+              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm space-y-3">
+                <div className="flex items-center justify-between border-b pb-2">
+                  <h4 className="text-xs font-bold text-slate-500 uppercase">▼ Walks Context Timestamps</h4>
+                </div>
+                <div className="space-y-2.5">
+                  {WALK_TASKS.map(task => {
+                    const status = activeLogs[task.id] || 'empty';
+                    return (
+                      <div key={task.id} className="flex items-center justify-between text-sm">
+                        <div className="flex items-center gap-2 text-slate-700 font-medium">
+                          {task.icon}
+                          {task.label}
+                        </div>
+                        <div className="flex bg-slate-50 p-0.5 rounded-md border text-[11px] font-bold">
+                          {['yes', 'no', 'na'].map(state => (
+                            <button
+                              key={state}
+                              onClick={() => updateDayData(selectedDate, { [task.id]: state })}
+                              className={`px-2 py-0.5 uppercase rounded ${
+                                status === state 
+                                  ? state === 'yes' ? 'bg-emerald-500 text-white' : state === 'no' ? 'bg-red-500 text-white' : 'bg-slate-400 text-white'
+                                  : 'text-slate-500 hover:bg-slate-200'
+                              }`}
+                            >
+                              {state === 'na' ? 'N/A' : state}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* MEALS FUELING MATRIX CONTAINER */}
+              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm space-y-3">
+                <div className="flex items-center justify-between border-b pb-2">
+                  <h4 className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><Utensils size={12}/> ▼ Meal Fueling Diary</h4>
+                </div>
+                <div className="space-y-3">
+                  {MEAL_TASKS.map(task => {
+                    const status = activeLogs[task.id] || 'empty';
+                    return (
+                      <div key={task.id} className="flex flex-col gap-1.5 pb-2 border-b border-dashed last:border-0 last:pb-0">
+                        <span className="text-xs font-semibold text-slate-600 pl-1">{task.label}</span>
+                        <div className="grid grid-cols-4 gap-1 bg-slate-50 p-0.5 rounded-lg border text-[10px] font-bold text-center">
+                          {[
+                            { key: 'cooked', label: '🍳 COOKED' },
+                            { key: 'ordered', label: '🏙️ ORDERED' },
+                            { key: 'ate_out', label: '💼 ATE OUT' },
+                            { key: 'skipped', label: '💨 SKIPPED' }
+                          ].map(opt => (
+                            <button
+                              key={opt.key}
+                              onClick={() => updateDayData(selectedDate, { [task.id]: opt.key })}
+                              className={`py-1 rounded-md transition-all uppercase ${
+                                status === opt.key
+                                  ? opt.key === 'cooked' ? 'bg-emerald-500 text-white shadow-sm' :
+                                    opt.key === 'ordered' ? 'bg-blue-500 text-white shadow-sm' :
+                                    opt.key === 'ate_out' ? 'bg-indigo-500 text-white shadow-sm' : 'bg-slate-400 text-white shadow-sm'
+                                  : 'text-slate-500 hover:bg-slate-200'
+                              }`}
+                            >
+                              {opt.label.split(' ')[1]}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </section>
+
+            {/* 6. TEXT BOX JOURNAL & REFLECTION CELL */}
+            <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm space-y-2">
+              <div className="flex justify-between items-center border-b pb-1.5">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1">📝 Daily Reflection & Mood Context</h3>
+                <span className="text-[10px] font-medium text-slate-400">
+                  {savingJournal ? 'Saving...' : 'Saved'}
                 </span>
               </div>
-              <div className="w-full bg-slate-100 h-2 rounded-full mt-3 overflow-hidden">
-                <div 
-                  className="bg-blue-600 h-full rounded-full transition-all duration-500" 
-                  style={{ width: `${currentStats.rate}%` }}
-                />
-              </div>
-            </div>
-
-            <button 
-              onClick={() => setActiveTab('input')}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-xl shadow-sm transition-all text-sm flex items-center justify-center gap-2"
-            >
-              <Edit3 size={16} />
-              Open logging for this day
-            </button>
+              <p className="text-slate-400 text-[11px] leading-relaxed italic">
+                How are you feeling today? Any specific blockers, triggers, or calendar wins?
+              </p>
+              <textarea
+                value={journalText}
+                onChange={(e) => handleJournalChange(e.target.value)}
+                placeholder="Had intense back-to-back meetings today. Felt super drained by 2 PM..."
+                rows={3}
+                className="w-full text-xs p-3 border rounded-xl bg-slate-50/50 text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none font-medium leading-normal"
+              />
+            </section>
           </div>
-        )}
-
-        {/* ANALYTICS STATS VIEW */}
-        {activeTab === 'stats' && (
-          <div className="space-y-6">
-            <h2 className="text-lg font-bold text-slate-900 px-1">Global Dashboard</h2>
-
-            {/* General metrics cards */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
-                  <TrendingUp size={20} />
-                </div>
-                <div>
-                  <span className="text-xs text-slate-400 font-medium block">Archive completion</span>
-                  <span className="text-lg font-bold text-slate-900">{currentStats.rate}%</span>
-                </div>
-              </div>
-
-              <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
-                  <Award size={20} />
-                </div>
-                <div>
-                  <span className="text-xs text-slate-400 font-medium block">Logged entries</span>
-                  <span className="text-lg font-bold text-slate-900">
-                    {Object.values(data).filter(v => v === 'yes').length}
-                  </span>
-                </div>
-              </div>
+        ) : (
+          /* ARCHIVE / REFLECTION TAB VIEW */
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
+            <div>
+              <h2 className="text-base font-bold text-slate-900">Historical Log History</h2>
+              <p className="text-xs text-slate-500 mt-0.5">Review chronological entries and cross-reference behavioral metadata indicators.</p>
             </div>
-
-            {/* Quick Status Breakdown */}
-            <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4">
-              <h3 className="font-bold text-slate-900 text-sm">Target Status Breakdown (Today)</h3>
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-semibold text-slate-500 flex items-center gap-1.5">
-                    <span className="w-3 h-3 rounded bg-emerald-500" /> Yes
-                  </span>
-                  <span className="font-bold text-slate-900">{currentStats.totals.yes}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-semibold text-slate-500 flex items-center gap-1.5">
-                    <span className="w-3 h-3 rounded bg-red-500" /> No
-                  </span>
-                  <span className="font-bold text-slate-900">{currentStats.totals.no}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-semibold text-slate-500 flex items-center gap-1.5">
-                    <span className="w-3 h-3 rounded bg-slate-400" /> N/A
-                  </span>
-                  <span className="font-bold text-slate-900">{currentStats.totals.na}</span>
-                </div>
-              </div>
+            
+            <div className="space-y-3 divide-y">
+              {Object.keys(allLogs).length === 0 ? (
+                <p className="text-xs text-slate-400 py-4 text-center font-medium">No recorded habit checkpoints synchronized yet.</p>
+              ) : (
+                Object.keys(allLogs).sort((a,b) => b.localeCompare(a)).map(dateKey => {
+                  const dayData = allLogs[dateKey];
+                  const dailyProgress = calculateDailyProgress(dateKey);
+                  return (
+                    <div key={dateKey} className="pt-3 first:pt-0 text-xs">
+                      <div className="flex justify-between items-center font-bold text-slate-700">
+                        <span>{dateKey} <span className="font-normal capitalize text-slate-400">({dayData.day_context || 'home'} day)</span></span>
+                        <span className="text-indigo-600 font-extrabold">{dailyProgress.pct}% Core Goals</span>
+                      </div>
+                      
+                      {dayData.journal_entry && (
+                        <div className="mt-1.5 bg-slate-50 p-2 rounded-lg border border-dashed text-slate-600 font-medium italic">
+                          "{dayData.journal_entry}"
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
             </div>
           </div>
         )}
-
       </main>
 
-      {/* FOOTER NAV BAR */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 p-4 flex justify-around shadow-xl z-40">
+      {/* FOOTER TAB NAV BAR */}
+      <nav className="fixed bottom-0 left-0 right-0 border-t bg-white px-6 py-3 shadow-xl flex justify-around items-center z-50">
         <button 
           onClick={() => setActiveTab('input')} 
-          className={`flex flex-col items-center gap-1 transition-all ${
-            activeTab === 'input' ? 'text-blue-600 font-bold scale-105' : 'text-slate-400'
-          }`}
+          className={`flex flex-col items-center gap-0.5 text-xs font-bold transition-colors ${activeTab === 'input' ? 'text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}
         >
-          <Edit3 size={20} />
-          <span className="text-[10px]">Log Day</span>
+          <Edit3 size={18} />
+          <span>Log Today</span>
         </button>
-
         <button 
-          onClick={() => setActiveTab('recent')} 
-          className={`flex flex-col items-center gap-1 transition-all ${
-            activeTab === 'recent' ? 'text-blue-600 font-bold scale-105' : 'text-slate-400'
-          }`}
+          onClick={() => setActiveTab('history')} 
+          className={`flex flex-col items-center gap-0.5 text-xs font-bold transition-colors ${activeTab === 'history' ? 'text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}
         >
-          <Calendar size={20} />
-          <span className="text-[10px]">Recent</span>
-        </button>
-
-        <button 
-          onClick={() => setActiveTab('stats')} 
-          className={`flex flex-col items-center gap-1 transition-all ${
-            activeTab === 'stats' ? 'text-blue-600 font-bold scale-105' : 'text-slate-400'
-          }`}
-        >
-          <BarChart3 size={20} />
-          <span className="text-[10px]">Stats</span>
+          <Calendar size={18} />
+          <span>View History</span>
         </button>
       </nav>
     </div>
